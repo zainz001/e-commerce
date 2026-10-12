@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Eastern Wear - Private Visual Check</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">PRIVATE LOCAL PROTOTYPE</p>
+          <h1>Generate a fitted suit preview</h1>
+          <p class="intro">Capture one local camera frame, then synthesize the selected suit onto the person in that frame.</p>
+        </div>
+        <span class="privacy-pill">Nothing is uploaded</span>
+      </header>
+
+      <section class="workspace" aria-label="Camera preview and garment controls">
+        <div class="stage-card">
+          <div class="stage" id="stage">
+            <div class="stage-placeholder" id="placeholder">
+              <span class="camera-icon">O</span>
+              <strong>Camera is off</strong>
+              <span>Start the camera to track your body.</span>
+            </div>
+            <video id="camera" autoplay muted playsinline aria-hidden="true"></video>
+            <canvas id="render" aria-label="Local fitted suit preview"></canvas>
+            <div class="stage-badge">LOCAL FITTED PREVIEW</div>
+          </div>
+          <div class="stage-footer">
+            <span id="status" data-kind="idle">Camera is off</span>
+            <div class="stage-actions">
+              <button id="try-on" class="secondary" type="button" disabled>Generate fitted still (slow, optional)</button>
+              <button id="toggle-camera" class="primary" type="button">Turn on camera</button>
+            </div>
+          </div>
+        </div>
+
+        <aside class="controls-card">
+          <div class="card-heading">
+            <div>
+              <p class="eyebrow">GARMENT</p>
+              <h2 id="garment-title">Elaf Premium 10</h2>
+            </div>
+            <span class="unverified">Local test</span>
+          </div>
+
+          <div class="capture-panel">
+            <label for="suit-select">Choose suit</label>
+            <select id="suit-select">
+              <option value="builtin">Elaf Premium 10 (built-in)</option>
+            </select>
+            <label for="suit-upload">Add another suit (front photo, PNG with transparent background works best)</label>
+            <input id="suit-upload" type="file" accept="image/png,image/jpeg,image/webp" />
+            <p>Added suits stay in this browser tab only and are private-test-only.</p>
+          </div>
+
+          <div class="tracker-help">
+            <strong>For a fitted result</strong>
+            <p>Start the camera, stand facing forward with your upper body visible, then generate a still. The local model synthesizes the suit onto that person image.</p>
+          </div>
+
+          <div class="capture-panel">
+            <label for="calibration-stage">Calibration recording</label>
+            <select id="calibration-stage">
+              <option value="reference_neutral_clothing">Reference: neutral clothing</option>
+              <option value="wearing_exact_garment">Wearing: exact suit</option>
+            </select>
+            <button id="record-calibration" class="secondary" type="button" disabled>Start full-video recording</button>
+            <p id="recording-status">Camera off. Nothing is recorded.</p>
+          </div>
+
+          <div class="notice">
+            <strong>Current path</strong>
+            <p>FASHN generates the fitted still. While it is unavailable, a temporary upright garment guide follows the shoulders and hips so the garment remains visible.</p>
+            <strong>Still not proven</strong>
+            <p>Measured size, comfort, tailoring, fabric stretch, or physical fit. Continuous fitted video is a separate later milestone.</p>
+          </div>
+        </aside>
+      </section>
+
+      <footer class="disclaimer">
+        Camera access is requested only by your click and stays in this browser tab. The supplied cutout is AI-assisted and marked unverified, for private prototype testing only.
+      </footer>
+    </main>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

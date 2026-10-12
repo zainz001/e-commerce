@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68", "wheel==0.48.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "eastern-wear-dataset"
+version = "0.1.0"
+description = "Local, rights-aware tooling for the Eastern-Wear video dataset"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest==9.1.1"]
+
+[project.scripts]
+dataset = "dataset.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

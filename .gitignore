@@ -1,0 +1,62 @@
+# Python and local tooling
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+.venv-vton/
+dist/
+build/
+*.egg-info/
+
+# Environment files and local secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Personal source media and protected records: never commit these.
+data/raw/
+data/derived/
+data/annotations/
+private/
+tools/
+
+# External model source trees, browser runtimes, and downloaded weights are
+# local setup artifacts. The integration code and documentation remain tracked.
+vendor/
+prototype/vendor/
+
+# Generated reports and split outputs are reproducible and remain local by default.
+data/reports/
+data/splits/
+
+# Generated manifests are local by default; the fictional example is intentionally tracked.
+data/manifests/*.jsonl
+!data/manifests/example_*.jsonl
+
+# Media and common exports anywhere in the repository.
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.webm
+*.jpg
+*.jpeg
+*.png
+*.webp
+*.heic
+*.gif
+*.wav
+*.mp3
+*.srt
+*.vtt
+
+# Local editor and operating-system files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
