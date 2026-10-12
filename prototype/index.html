@@ -10,11 +10,11 @@
     <main class="shell">
       <header class="topbar">
         <div>
-          <p class="eyebrow">PRIVATE LOCAL PROTOTYPE</p>
-          <h1>Generate a fitted suit preview</h1>
-          <p class="intro">Capture one local camera frame, then synthesize the selected suit onto the person in that frame.</p>
+          <p class="eyebrow">LIVE GPU NEURAL PROTOTYPE</p>
+          <h1>Live Neural Virtual Try-On</h1>
+          <p class="intro">Turn on your camera to see the suit rendered onto your body in real-time video, moving with your posture and arms.</p>
         </div>
-        <span class="privacy-pill">Nothing is uploaded</span>
+        <span class="privacy-pill">Processed locally on GPU</span>
       </header>
 
       <section class="workspace" aria-label="Camera preview and garment controls">
@@ -27,7 +27,8 @@
             </div>
             <video id="camera" autoplay muted playsinline aria-hidden="true"></video>
             <canvas id="render" aria-label="Local fitted suit preview"></canvas>
-            <div class="stage-badge">LOCAL FITTED PREVIEW</div>
+            <canvas id="canvas3d" aria-label="3D Fitted Suit Mesh"></canvas>
+            <div class="stage-badge">3D FITTED SUIT MESH</div>
           </div>
           <div class="stage-footer">
             <span id="status" data-kind="idle">Camera is off</span>

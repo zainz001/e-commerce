@@ -35,7 +35,8 @@ h2 { margin: 0; font-family: Georgia, serif; font-size: 25px; font-weight: 500; 
 .stage { position: relative; aspect-ratio: 16 / 10; min-height: 420px; overflow: hidden; background: linear-gradient(145deg, #49333d, #211820 65%); }
 #camera { display: none; }
 #render { display: block; width: 100%; height: 100%; object-fit: cover; }
-.stage-placeholder { position: absolute; inset: 0; z-index: 1; display: grid; place-content: center; justify-items: center; gap: 9px; color: var(--muted); text-align: center; }
+#canvas3d { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; z-index: 2; }
+.stage-placeholder { position: absolute; inset: 0; z-index: 4; display: grid; place-content: center; justify-items: center; gap: 9px; color: var(--muted); text-align: center; }
 .stage-placeholder strong { color: var(--ink); font-size: 18px; }
 .stage-placeholder span:last-child { font-size: 13px; }
 .camera-icon { display: grid; width: 56px; height: 56px; place-items: center; border: 1px solid rgba(255,255,255,.25); border-radius: 50%; color: var(--pink); font-size: 22px; }

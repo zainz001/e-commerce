@@ -104,8 +104,75 @@ class TryOnHandler(SimpleHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.end_headers()
 
+    neural_model: Any = None
+    cached_garment_src: str | None = None
+    cached_garment_rgba: Any = None
+
+    def _handle_live_tryon(self, request: dict[str, Any]) -> None:
+        import cv2
+        import numpy as np
+        from prototype.tryon_engine import parse_landmarks, skeleton_warp_garment, realistic_tryon_blend
+
+        person_bytes = decode_data_url(request["person_image"])
+        person_nparr = np.frombuffer(person_bytes, np.uint8)
+        person_bgr = cv2.imdecode(person_nparr, cv2.IMREAD_COLOR)
+        if person_bgr is None:
+            raise ValueError("Could not decode person camera frame")
+        h, w = person_bgr.shape[:2]
+
+        garment_src = request.get("garment_image")
+        if garment_src and garment_src == TryOnHandler.cached_garment_src and TryOnHandler.cached_garment_rgba is not None:
+            garment_rgba = TryOnHandler.cached_garment_rgba
+        elif garment_src:
+            garment_bytes = decode_data_url(garment_src)
+            garment_nparr = np.frombuffer(garment_bytes, np.uint8)
+            garment_raw = cv2.imdecode(garment_nparr, cv2.IMREAD_UNCHANGED)
+            if garment_raw is not None:
+                if len(garment_raw.shape) == 3 and garment_raw.shape[2] == 4:
+                    garment_rgba = garment_raw
+                else:
+                    # If 3 channels (no alpha), auto-detect white/light background
+                    bgr = garment_raw[:, :, :3]
+                    is_bg = (bgr[:, :, 0] > 235) & (bgr[:, :, 1] > 235) & (bgr[:, :, 2] > 235)
+                    alpha = (~is_bg).astype(np.uint8) * 255
+                    garment_rgba = np.dstack([bgr, alpha])
+                TryOnHandler.cached_garment_src = garment_src
+                TryOnHandler.cached_garment_rgba = garment_rgba
+            else:
+                garment_rgba = np.zeros((h, w, 4), dtype=np.uint8)
+        else:
+            garment_rgba = np.zeros((h, w, 4), dtype=np.uint8)
+
+        mask_src = request.get("body_mask")
+        if mask_src:
+            mask_bytes = decode_data_url(mask_src)
+            mask_nparr = np.frombuffer(mask_bytes, np.uint8)
+            mask = cv2.imdecode(mask_nparr, cv2.IMREAD_GRAYSCALE)
+            if mask is not None:
+                mask = cv2.resize(mask, (w, h), interpolation=cv2.INTER_NEAREST)
+            else:
+                mask = np.zeros((h, w), dtype=np.uint8)
+        else:
+            mask = np.zeros((h, w), dtype=np.uint8)
+
+        if np.count_nonzero(mask) < 100:
+            mask = np.zeros((h, w), dtype=np.uint8)
+            mask[int(h * 0.18):int(h * 0.88), int(w * 0.2):int(w * 0.8)] = 255
+
+        # Extract landmarks and warp garment to human skeleton
+        landmarks = request.get("landmarks")
+        kp = parse_landmarks(landmarks, h, w, mask)
+        warped = skeleton_warp_garment(garment_rgba, kp, h, w)
+
+        # Apply physical fold lighting and seamless soft-edge composite
+        out_bgr = realistic_tryon_blend(person_bgr, warped, mask)
+
+        _, buf = cv2.imencode(".jpg", out_bgr, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        encoded = base64.b64encode(buf).decode("ascii")
+        self._write_json({"image": f"data:image/jpeg;base64,{encoded}"})
+
     def do_POST(self) -> None:  # noqa: N802 - stdlib handler API
-        if self.path != "/api/tryon":
+        if self.path not in ("/api/tryon", "/api/live_neural_tryon"):
             self._write_json({"error": "not_found"}, HTTPStatus.NOT_FOUND)
             return
 
@@ -119,6 +186,9 @@ class TryOnHandler(SimpleHTTPRequestHandler):
 
         try:
             request = json.loads(self.rfile.read(content_length))
+            if self.path == "/api/live_neural_tryon":
+                self._handle_live_tryon(request)
+                return
             from PIL import Image, ImageOps
 
             person = ImageOps.exif_transpose(Image.open(io.BytesIO(decode_data_url(request["person_image"]))))

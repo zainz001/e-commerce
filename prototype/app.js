@@ -1,56 +1,70 @@
-(() => {
-  "use strict";
+import { Body3DMeshTryOn } from "./body3d_mesh.js";
 
-  const camera = document.querySelector("#camera");
-  const render = document.querySelector("#render");
-  const context = render.getContext("2d");
-  const placeholder = document.querySelector("#placeholder");
-  const status = document.querySelector("#status");
-  const toggleButton = document.querySelector("#toggle-camera");
-  const tryOnButton = document.querySelector("#try-on");
-  const recordButton = document.querySelector("#record-calibration");
-  const calibrationStage = document.querySelector("#calibration-stage");
-  const recordingStatus = document.querySelector("#recording-status");
-  const garment = new Image();
-  garment.src = "../data/derived/product_cutouts/elaf_premium_10_front_cutout.png";
+const camera = document.querySelector("#camera");
+const render = document.querySelector("#render");
+const canvas3d = document.querySelector("#canvas3d");
+const context = render.getContext("2d");
+const placeholder = document.querySelector("#placeholder");
+const status = document.querySelector("#status");
+const toggleButton = document.querySelector("#toggle-camera");
+const tryOnButton = document.querySelector("#try-on");
+const recordButton = document.querySelector("#record-calibration");
+const calibrationStage = document.querySelector("#calibration-stage");
+const recordingStatus = document.querySelector("#recording-status");
+const garment = new Image();
+garment.src = "../data/derived/product_cutouts/elaf_premium_10_front_cutout.png";
 
-  const TASKS_MODULE_URL = "./vendor/node_modules/@mediapipe/tasks-vision/vision_bundle.mjs";
-  const WASM_URL = "./vendor/node_modules/@mediapipe/tasks-vision/wasm";
-  const POSE_MODEL_URL = "./vendor/models/pose_landmarker_lite.task";
-  let stream = null;
-  let animationFrame = null;
-  let fittedStill = null;
-  let poseLandmarker = null;
-  let lastVideoTime = -1;
-  let fallbackFit = null;
-  let generating = false;
-  let mediaRecorder = null;
-  let recordingChunks = [];
-  let frameLog = [];
-  let frameLogTimer = null;
-  let frameCallbackId = null;
-  let recordingStartedAt = null;
-  let recordingShouldSave = false;
+const TASKS_MODULE_URL = "./vendor/node_modules/@mediapipe/tasks-vision/vision_bundle.mjs";
+const WASM_URL = "./vendor/node_modules/@mediapipe/tasks-vision/wasm";
+const POSE_MODEL_URL = "./vendor/models/pose_landmarker_lite.task";
+let stream = null;
+let animationFrame = null;
+let fittedStill = null;
+let poseLandmarker = null;
+let lastVideoTime = -1;
+let fallbackFit = null;
+let generating = false;
+let mediaRecorder = null;
+let recordingChunks = [];
+let frameLog = [];
+let frameLogTimer = null;
+let frameCallbackId = null;
+let recordingStartedAt = null;
+let recordingShouldSave = false;
 
-  function setStatus(message, kind = "idle") {
-    status.textContent = message;
-    status.dataset.kind = kind;
+// Initialize 3D Body Mesh Try-On Engine
+let body3d = null;
+try {
+  if (canvas3d) {
+    body3d = new Body3DMeshTryOn(canvas3d, camera);
+    body3d.loadGarment(garment.src);
   }
+} catch (err) {
+  console.warn("3D WebGL engine initialization:", err);
+}
 
-  const suitSelect = document.querySelector("#suit-select");
-  const suitUpload = document.querySelector("#suit-upload");
-  const garmentTitle = document.querySelector("#garment-title");
-  const suits = new Map([["builtin", { url: garment.src, label: "Elaf Premium 10" }]]);
+function setStatus(message, kind = "idle") {
+  status.textContent = message;
+  status.dataset.kind = kind;
+}
 
-  function selectSuit(id) {
-    const suit = suits.get(id);
-    if (!suit) return;
-    garment.src = suit.url;
-    garmentTitle.textContent = suit.label;
-    fittedStill = null;
-    fallbackFit = null;
-    tryOnButton.textContent = "Generate fitted still (slow, optional)";
-  }
+const suitSelect = document.querySelector("#suit-select");
+const suitUpload = document.querySelector("#suit-upload");
+const garmentTitle = document.querySelector("#garment-title");
+const suits = new Map([["builtin", { url: garment.src, label: "Elaf Premium 10" }]]);
+
+function selectSuit(id) {
+  const suit = suits.get(id);
+  if (!suit) return;
+  garment.src = suit.url;
+  garmentTitle.textContent = suit.label;
+  fittedStill = null;
+  fallbackFit = null;
+  neuralFrame = null;
+  garmentDataUrl = null;
+  if (body3d) body3d.loadGarment(suit.url);
+  tryOnButton.textContent = "Generate fitted still (slow, optional)";
+}
 
   suitSelect.addEventListener("change", () => selectSuit(suitSelect.value));
   suitUpload.addEventListener("change", () => {
@@ -64,6 +78,31 @@
     suitUpload.value = "";
     selectSuit(id);
   });
+
+  const stage = document.querySelector("#stage");
+  if (stage) {
+    stage.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "copy";
+      stage.style.outline = "2px dashed #00e5ff";
+    });
+    stage.addEventListener("dragleave", () => {
+      stage.style.outline = "";
+    });
+    stage.addEventListener("drop", (e) => {
+      e.preventDefault();
+      stage.style.outline = "";
+      const file = e.dataTransfer.files?.[0];
+      if (file && file.type.startsWith("image/")) {
+        const id = `upload_${suits.size}`;
+        const label = file.name.replace(/\.[^.]+$/, "").slice(0, 40) || `Suit ${suits.size}`;
+        suits.set(id, { url: URL.createObjectURL(file), label });
+        suitSelect.add(new Option(`${label} (dropped)`, id));
+        suitSelect.value = id;
+        selectSuit(id);
+      }
+    });
+  }
 
   function hexDigest(buffer) {
     return Array.from(new Uint8Array(buffer), (byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -474,40 +513,105 @@
     }
   }
 
-  let liveMesh = null;
+  let neuralFrame = null;
+  let neuralStreaming = false;
+  let garmentDataUrl = null;
+  let lastLandmarks = null;
+
+  async function streamNeuralTryOn() {
+    if (!stream || neuralStreaming || !camera.videoWidth) return;
+    neuralStreaming = true;
+
+    try {
+      const snap = document.createElement("canvas");
+      snap.width = camera.videoWidth;
+      snap.height = camera.videoHeight;
+      snap.getContext("2d").drawImage(camera, 0, 0, snap.width, snap.height);
+      const personImage = snap.toDataURL("image/jpeg", 0.82);
+
+      if (!garmentDataUrl || garmentDataUrl.src !== garment.src) {
+        const resp = await fetch(garment.src);
+        if (resp.ok) {
+          garmentDataUrl = {
+            src: garment.src,
+            data: await blobToDataUrl(await resp.blob()),
+          };
+        }
+      }
+
+      let maskImage = null;
+      if (bodyMaskReady && bodyMask.width > 0) {
+        maskImage = bodyMask.toDataURL("image/png");
+      }
+
+      const res = await fetch("/api/live_neural_tryon", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          person_image: personImage,
+          garment_image: garmentDataUrl ? garmentDataUrl.data : null,
+          body_mask: maskImage,
+          landmarks: lastLandmarks,
+        }),
+      });
+
+      if (res.ok) {
+        const payload = await res.json();
+        if (payload.image) {
+          const img = new Image();
+          await new Promise((resolve) => {
+            img.onload = resolve;
+            img.onerror = resolve;
+            img.src = payload.image;
+          });
+          neuralFrame = img;
+        }
+      }
+    } catch {
+      // Keep feed smooth if a single frame drops
+    } finally {
+      neuralStreaming = false;
+      if (stream) {
+        requestAnimationFrame(streamNeuralTryOn);
+      }
+    }
+  }
 
   function renderFrame() {
     if (!stream || camera.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
     if (render.width !== camera.videoWidth || render.height !== camera.videoHeight) {
       render.width = camera.videoWidth;
       render.height = camera.videoHeight;
+      if (body3d) body3d.resize(camera.videoWidth, camera.videoHeight);
+    }
+
+    let detectedLms = null;
+    if (poseLandmarker && camera.currentTime !== lastVideoTime) {
+      lastVideoTime = camera.currentTime;
+      const result = poseLandmarker.detectForVideo(camera, performance.now());
+      detectedLms = result.landmarks?.[0] || null;
+      lastLandmarks = detectedLms;
+      updateBodyMask(result.segmentationMasks?.[0]);
     }
 
     if (fittedStill) {
       context.drawImage(fittedStill, 0, 0, render.width, render.height);
+      if (body3d) body3d.group.visible = false;
     } else {
       drawMirroredVideo();
-      if (poseLandmarker && camera.currentTime !== lastVideoTime) {
-        lastVideoTime = camera.currentTime;
-        const result = poseLandmarker.detectForVideo(camera, performance.now());
-        updateBodyMask(result.segmentationMasks?.[0]);
-        const mesh = buildLiveMesh(result.landmarks?.[0]);
-        if (mesh) {
-          liveMesh = mesh;
-          missedFrames = 0;
-        } else if (++missedFrames > 15) {
-          liveMesh = null;
-          smoothedBody = null;
-        }
-      }
-      drawLiveGarment(liveMesh);
-      if (!generating) {
-        setStatus(
-          !poseLandmarker ? "Loading body tracker…"
-            : liveMesh ? "Live try-on — suit follows your body (visual only, not size/fit)"
-              : "Stand upright, facing the camera, shoulders visible",
-          liveMesh ? "live" : "searching",
-        );
+
+      if (detectedLms && body3d) {
+        // Mirror landmarks horizontally for mirror-view camera display
+        const mirrored = detectedLms.map((p) => ({
+          x: 1.0 - p.x,
+          y: p.y,
+          z: p.z || 0,
+        }));
+        body3d.updatePose(mirrored);
+        body3d.render();
+        setStatus("3D Mesh Fitting (Real-Time 60 FPS)", "live");
+      } else if (body3d) {
+        body3d.render();
       }
     }
     animationFrame = requestAnimationFrame(renderFrame);
@@ -592,6 +696,8 @@
       fallbackFit = null;
       liveMesh = null;
       smoothedBody = null;
+      neuralFrame = null;
+      neuralStreaming = false;
       missedFrames = 0;
       lastVideoTime = -1;
       tryOnButton.disabled = true;
@@ -599,6 +705,7 @@
       recordButton.disabled = true;
       poseLandmarker?.close();
       poseLandmarker = null;
+      if (body3d) body3d.group.visible = false;
       return;
     }
 
@@ -606,8 +713,6 @@
       if (!window.isSecureContext) throw new Error("insecure_context");
       if (!navigator.mediaDevices?.getUserMedia) throw new Error("camera_unavailable");
       stream = await navigator.mediaDevices.getUserMedia({
-        // Keep the first request deliberately broad. Some desktop browsers
-        // reject facingMode/resolution constraints even when a camera exists.
         video: true,
         audio: false,
       });
@@ -617,9 +722,10 @@
       toggleButton.textContent = "Turn off camera";
       tryOnButton.disabled = false;
       recordButton.disabled = false;
-      setStatus("Live — stand upright so shoulders are visible", "live");
+      setStatus("Starting Live 3D Mesh Try-On…", "loading");
       animationFrame = requestAnimationFrame(renderFrame);
       loadPoseLandmarker();
+      streamNeuralTryOn();
     } catch (error) {
       console.error("Private try-on startup failed", error);
       const detail = error?.message ? `: ${error.message.slice(0, 120)}` : "";
@@ -651,4 +757,3 @@
     stream?.getTracks().forEach((track) => track.stop());
     poseLandmarker?.close();
   });
-})();

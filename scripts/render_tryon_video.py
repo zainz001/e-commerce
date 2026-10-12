@@ -19,7 +19,10 @@ import torch.nn.functional as F
 from PIL import Image
 from tqdm import tqdm
 
-from train_personal import TryOnGenerator
+try:
+    from scripts.train_personal import TryOnGenerator
+except ImportError:
+    from train_personal import TryOnGenerator
 
 
 def load_model(checkpoint_path: Path, device: torch.device) -> TryOnGenerator:
@@ -81,12 +84,14 @@ def render_tryon_video(
     if garment_raw is None:
         raise ValueError(f"Could not read garment: {garment_path}")
 
-    # If garment has alpha channel, blend onto white/neutral before processing
+    # Ensure garment has alpha channel
     if garment_raw.shape[2] == 4:
-        alpha = garment_raw[:, :, 3] / 255.0
-        garment_bgr = (garment_raw[:, :, :3] * alpha[:, :, None] + (1.0 - alpha[:, :, None]) * 255).astype(np.uint8)
+        garment_rgba = garment_raw
     else:
-        garment_bgr = garment_raw
+        bgr = garment_raw[:, :, :3]
+        is_bg = (bgr[:, :, 0] > 235) & (bgr[:, :, 1] > 235) & (bgr[:, :, 2] > 235)
+        alpha = (~is_bg).astype(np.uint8) * 255
+        garment_rgba = np.dstack([bgr, alpha])
 
     first_frame_path = data_dir / samples[0]["frame_file"]
     sample_frame = cv2.imread(str(first_frame_path))
@@ -96,33 +101,27 @@ def render_tryon_video(
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     out = cv2.VideoWriter(str(output_video_path), fourcc, fps, (w, h))
 
+    from prototype.tryon_engine import parse_landmarks, skeleton_warp_garment, realistic_tryon_blend
+
     print(f"Rendering try-on video for {len(samples)} frames -> {output_video_path}...", flush=True)
 
-    with torch.no_grad():
-        for item in tqdm(samples, desc="Synthesizing Frames"):
-            agnostic_p = data_dir / item["agnostic_file"]
-            mask_p = data_dir / item["mask_file"]
+    for item in tqdm(samples, desc="Synthesizing Frames"):
+        frame_p = data_dir / item["frame_file"]
+        mask_p = data_dir / item["mask_file"]
 
-            agnostic_bgr = cv2.imread(str(agnostic_p))
-            mask = cv2.imread(str(mask_p), cv2.IMREAD_GRAYSCALE)
+        frame_bgr = cv2.imread(str(frame_p))
+        mask = cv2.imread(str(mask_p), cv2.IMREAD_GRAYSCALE)
 
-            # Align target suit into your body's clothing region
-            aligned_garment_rgb = prepare_garment_input(garment_bgr, mask, (h, w))
-            agnostic_rgb = cv2.cvtColor(agnostic_bgr, cv2.COLOR_BGR2RGB)
+        # Estimate pose skeleton from mask and silhouette
+        kp = parse_landmarks(None, h, w, mask)
 
-            # Convert to PyTorch tensors
-            agnostic_t = torch.from_numpy(agnostic_rgb).permute(2, 0, 1).unsqueeze(0).float().to(device_obj) / 255.0
-            garment_t = torch.from_numpy(aligned_garment_rgb).permute(2, 0, 1).unsqueeze(0).float().to(device_obj) / 255.0
-            mask_t = torch.from_numpy(mask).unsqueeze(0).unsqueeze(0).float().to(device_obj) / 255.0
+        # Warp garment along wearer skeleton
+        warped = skeleton_warp_garment(garment_rgba, kp, h, w)
 
-            # Generate photorealistic frame with neural model
-            with torch.cuda.amp.autocast(enabled=(device_obj.type == "cuda")):
-                pred_t = model(agnostic_t, mask_t, garment_t)
+        # Apply physical fold lighting and seamless soft-edge composite
+        rendered_bgr = realistic_tryon_blend(frame_bgr, warped, mask)
 
-            pred_np = (pred_t.squeeze(0).permute(1, 2, 0).cpu().numpy() * 255.0).clip(0, 255).astype(np.uint8)
-            pred_bgr = cv2.cvtColor(pred_np, cv2.COLOR_RGB2BGR)
-
-            out.write(pred_bgr)
+        out.write(rendered_bgr)
 
     out.release()
     print(f"\nDone! High-quality try-on video saved to: {output_video_path}")
